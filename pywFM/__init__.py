@@ -1,8 +1,11 @@
-from subprocess import call
+from subprocess import call, DEVNULL
 import os
 import tempfile
 
-class FM:
+from sklearn.base import BaseEstimator
+
+
+class FM(BaseEstimator):
     """ Class that wraps `libFM` parameters. For more information read
     [libFM manual](http://www.libfm.org/libfm-1.42.manual.pdf)
 
@@ -87,17 +90,21 @@ class FM:
                  temp_path = None):
 
         # gets first letter of either regression or classification
-        self.__task = task[0]
-        self.__num_iter = num_iter
-        self.__init_stdev = init_stdev
-        self.__dim = "%d,%d,%d" % (int(k0), int(k1), k2)
-        self.__learning_method = learning_method
-        self.__learn_rate = learn_rate
-        self.__regularization = "%d,%d,%d" % (r0_regularization, r1_regularization, r2_regularization)
-        self.__rlog = rlog
-        self.__verbose = int(verbose)
-        self.__silent = silent
-        self.__temp_path = temp_path
+        self.task = task[0]
+        self.num_iter = num_iter
+        self.init_stdev = init_stdev
+        self.k0 = k0
+        self.k1 = k1
+        self.k2 = k2
+        self.learning_method = learning_method
+        self.learn_rate = learn_rate
+        self.r0_regularization = r0_regularization
+        self.r1_regularization = r1_regularization
+        self.r2_regularization = r2_regularization
+        self.rlog = rlog
+        self.verbose = verbose
+        self.silent = silent
+        self.temp_path = temp_path
 
         # gets libfm path
         self.__libfm_path = os.environ.get('LIBFM_PATH')
@@ -140,55 +147,60 @@ class FM:
 
         from sklearn.datasets import dump_svmlight_file
 
-        train_fd,train_path = tempfile.mkstemp(dir=self.__temp_path)
-        test_fd,test_path = tempfile.mkstemp(dir=self.__temp_path)
-        out_fd,out_path = tempfile.mkstemp(dir=self.__temp_path)
-        model_fd,model_path = tempfile.mkstemp(dir=self.__temp_path)
+        train_fd,train_path = tempfile.mkstemp(dir=self.temp_path)
+        test_fd,test_path = tempfile.mkstemp(dir=self.temp_path)
+        out_fd,out_path = tempfile.mkstemp(dir=self.temp_path)
+        model_fd,model_path = tempfile.mkstemp(dir=self.temp_path)
 
         # converts train and test data to libSVM format
         dump_svmlight_file(x_train, y_train, train_path)
         dump_svmlight_file(x_test, y_test, test_path)
 
+        dim = "%d,%d,%d" % (int(self.k0), int(self.k1), self.k2)
+        regularization = "%d,%d,%d" % (self.r0_regularization, self.r1_regularization, self.r2_regularization)
+
         # builds arguments array
         args = [self.__libfm_path + 'libFM',
-                "-task %s" % self.__task,
+                "-task %s" % self.task,
                 "-train %s" % train_path,
                 "-test %s" % test_path,
-                "-dim '%s'" % self.__dim,
-                "-init_stdev %g" % self.__init_stdev,
-                "-iter %d" % self.__num_iter,
-                "-method %s" % self.__learning_method,
+                "-dim '%s'" % dim,
+                "-init_stdev %g" % self.init_stdev,
+                "-iter %d" % self.num_iter,
+                "-method %s" % self.learning_method,
                 "-out %s" % out_path,
-                "-verbosity %d" % self.__verbose,
+                "-verbosity %d" % int(self.verbose),
                 "-save_model %s" % model_path]
 
         # appends rlog if true
-        if self.__rlog:
-            rlog_fd,rlog_path = tempfile.mkstemp(dir=self.__temp_path)
+        if self.rlog:
+            rlog_fd,rlog_path = tempfile.mkstemp(dir=self.temp_path)
             args.append("-rlog %s" % rlog_path)
 
         # appends arguments that only work for certain learning methods
-        if self.__learning_method in ['sgd', 'sgda']:
-            args.append("-learn_rate %d" % self.__learn_rate)
+        if self.learning_method in ['sgd', 'sgda']:
+            args.append("-learn_rate %d" % self.learn_rate)
 
-        if self.__learning_method in ['sgd', 'sgda', 'als']:
-            args.append("-regular '%s'" % self.__regularization)
+        if self.learning_method in ['sgd', 'sgda', 'als']:
+            args.append("-regular '%s'" % regularization)
 
         # adds validation if sgda
         # if validation_set is none, libFM will throw error hence, I'm not doing any validation
-        if self.__learning_method == 'sgda' and (x_validation_set is not None and y_validation_set is not None):
-            validation_fd,validation_path = tempfile.mkstemp(dir=self.__temp_path)
+        if self.learning_method == 'sgda' and (x_validation_set is not None and y_validation_set is not None):
+            validation_fd,validation_path = tempfile.mkstemp(dir=self.temp_path)
             dump_svmlight_file(x_validation_set, y_validation_set, validation_path)
             args.append("-validation %s" % validation_path)
 
+        stdout = None
+
         # if silent redirects all output
-        if self.__silent:
-            args.append(" &> /dev/null")
+        if self.silent:
+            stdout = DEVNULL
 
         # call libfm with parsed arguments
         # unkown bug with "-dim" option on array -- forced to concatenate string
         args = ' '.join(args)
-        call(args, shell=True)
+        call(args, shell=True, stdout=stdout)
 
         # reads output file
         preds = []
@@ -224,7 +236,7 @@ class FM:
         pairwise_interactions = np.matrix(pairwise_interactions)
 
         # parses rlog into dataframe
-        if self.__rlog:
+        if self.rlog:
             # parses rlog into
             import pandas as pd
             rlog = pd.read_csv(rlog_path, sep='\t')
@@ -234,7 +246,7 @@ class FM:
             rlog = None
 
         # adds validation if sgda
-        if self.__learning_method == 'sgda' and (x_validation_set is not None and y_validation_set is not None):
+        if self.learning_method == 'sgda' and (x_validation_set is not None and y_validation_set is not None):
             os.close(validation_fd)
             os.remove(validation_path)
 
